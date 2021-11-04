@@ -1,0 +1,319 @@
+---
+title: "Practicum 2"
+author: "Gokcen Buyukbas"
+date: "10/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE, autodep=TRUE, cache.comments=FALSE,
+               message=FALSE, warning=FALSE)
+
+rm(list=ls())
+setwd("C:/Users/Gokcen/Desktop/Fall 21/S690-Statistical Consulting/Practicum 2")
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", 
+               "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+```
+
+## Libraries
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+library(psych)
+library(tidyverse)
+library(htmlTable)
+library(MASS)
+library(corrplot) #corrplot()
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(viridis)
+library(ggthemes)
+library(ggpubr)
+library(skimr) #skim(): summary alternative
+library(randomForest)
+require(caTools)
+library(stringr)
+library(scales) #comma notation for axis labels
+theme_set(
+  theme_minimal() +
+    theme(legend.position = "top")
+  )
+```
+
+## Data 
+```{r}
+sample2 = read.csv(file = 'prac_data.csv', header = TRUE, na.strings=c("","NA"))
+price = read.csv(file = 'price.csv')
+sample2 = subset(sample2,select=-c(day,month))
+sample2$price = price$price
+colnames(sample2)[colnames(sample2) == 'y'] = "purchase"
+colnames(sample2) = str_to_title(colnames(sample2)) 
+
+
+features = names(sample2)
+numerics = str_to_title(c('age','balance',"duration", "campaign", "pdays", "previous", "price"))
+categorical = features[!(features %in% numerics)]
+
+#"%notin%" <- Negate("%in%")
+for (var in names(sample2)){
+  if (var %in% categorical){
+    sample2[,var][which(is.na(sample2[,var]))] = "unknown"
+    sample2[,var] = as.factor(sample2[,var])
+  }
+}
+
+sample2$HousingorLoan = ifelse(
+  sample2$Housing =="yes" | sample2$Loan=="yes", "yes",
+  ifelse(sample2$Housing =="no" & sample2$Loan=="no", "no", "unknown"))
+
+categorical = c(categorical,"HousingorLoan")
+
+levels(sample2$Job)[levels(sample2$Job)=="admin."] <- "administrator"
+levels(sample2$Job)[levels(sample2$Job)=="self-employe"] <- "self-employed"
+
+levels(sample2$Contact)[levels(sample2$Contact)=="telepho"] <- "telephone"
+levels(sample2$Contact)[levels(sample2$Contact)=="cellula"] <- "cellular"
+
+levels(sample2$Purchase) = list(No = "no", Yes  = "ye")
+# summary(sample2)
+# sapply(sample2, class) #view the class of each column
+# colSums(is.na(sample2)) #view the missing value counts of each column
+```
+
+## Summary statistics
+```{r, echo=FALSE, include=FALSE}
+for (var in names(sample2)){
+  if (var %in% categorical){
+    print(var)
+    print(round(prop.table(table(sample2[,var], sample2$Purchase), margin = 2)*100,1))
+  }
+}
+```
+
+
+```{r}
+#Extract the initial sample, Pdays != -1)
+sample1 = filter(sample2, Pdays != -1)
+#summary(sample1)
+```
+
+```{r}
+#Change the variables inside group_by for different combinations.
+sample2 %>% 	group_by(Purchase) %>%
+  summarise(n = n())%>%
+  mutate(rel.freq = paste0(round(100 * n/sum(n), 1), "%"))
+  #summarise(mean = mean(Price ,  na.rm = TRUE))
+```
+
+```{r}
+#Change the variables inside group_by for different combinations.
+sample2 %>%
+	group_by(Purchase, Job) %>%
+	summarise(mean= mean(Price,na.rm=TRUE))
+```
+
+```{r}
+sample2 %>%
+  group_by(Purchase) %>%
+  skim(Price)
+
+```
+
+```{r}
+# Group proportions
+round((summary(sample2$Job)/length(sample2$Job)*100),1)
+```
+
+## EDA 
+### Categorical variables vs Purchase
+
+```{r, include=FALSE, echo=FALSE}
+# For loop for the individual categorigal variable graphs
+titles = c("Job", "Marital Status", "Education Level", "Default", "Primary Phone", "Outcome of previous marketing campaign", "Housing or Loan" )
+j = 1
+for (i in c(1,2,3,4,7,8,10)){
+  var = categorical[i]
+  print(ggplot(sample2, aes(y = sample2[,var], fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle(as.character(titles[j])) + 
+        scale_fill_manual(values = cbPalette))
+  j=j+1
+}
+```
+
+```{r}
+# Will order the categories in decreasing order
+p1 = ggplot(sample2, aes(y = sample2$Job, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Job") + 
+        scale_fill_manual(values = cbPalette) +theme(axis.text.y=element_text(size=rel(0.9)),plot.title=element_text(size=12))
+
+p2 = ggplot(sample2, aes(y = sample2$Education, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Education") + 
+        scale_fill_manual(values = cbPalette)+ theme(plot.title=element_text(size=12))
+
+p3 = ggplot(sample2, aes(y = sample2$Marital, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Marital Status") + 
+        scale_fill_manual(values = cbPalette)+ theme(plot.title=element_text(size=12))
+
+p4 = ggplot(sample2, aes(y = sample2$Default, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Default status") + 
+        scale_fill_manual(values = cbPalette)+ theme(plot.title=element_text(size=12))
+
+p5 = ggplot(sample2, aes(y = sample2$Contact, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Primary Contact") + 
+        scale_fill_manual(values = cbPalette)+ theme(plot.title=element_text(size=12))
+
+p6 = ggplot(sample2, aes(y = sample2$HousingorLoan, fill = Purchase)) + 
+      geom_bar(position = "fill") +
+      labs(x = "Proportion", y="")+
+      ggtitle("Housing or Loan") + 
+        scale_fill_manual(values = cbPalette)+ theme(plot.title=element_text(size=12))
+
+ggarrange(p1, p2, p3, p4, p5, p6, ncol=3, nrow=2, common.legend = TRUE, legend="bottom")
+```
+
+```{r}
+ggplot(sample2, aes(x = Price, colour = Purchase)) +
+  geom_density()+ 
+  scale_colour_manual(values = cbPalette) + theme(legend.position="bottom") +
+  ggtitle("Density plot by Purchase") + xlab("Price ($)")+ylab("Density") +
+  scale_x_continuous(breaks = seq(0, 170, by = 10))
+```
+
+
+### Categorical variables vs Price by Purchase
+
+```{r}
+# Categorical variables, box-plots
+plot_cat_price <- function(var, data) {
+  i=1
+  p = ggplot(data, aes(y=data[,var], x=Price, fill=Purchase)) + 
+  geom_boxplot(position=position_dodge(0.7)) + 
+      scale_color_manual(labels=c("Yes", "No")) +
+      ggtitle(as.character(var)) +
+      ylab(as.character(var)) +
+      scale_x_continuous(limits = c(0,175), breaks=seq(0,175,25))
+}
+
+for (var in names(sample2)){
+  if (var %in% categorical){
+    print(plot_cat_price(var, sample2))
+  }
+}
+```
+
+### Numarical variables vs Price by Purchase
+
+#### Correlation matrix
+```{r}
+log_vars = c("Balance", "Duration", "Campaign", "Pdays", "Previous")
+cor=round(cor(sample2[numerics], method = "pearson", use = "complete.obs"),2)
+
+corrplot(cor, title="Correlation matrix",mar=c(0,0,1,0))
+```
+
+
+```{r, include=FALSE, echo=FALSE}
+# Individual plots of numerical variables with a for loop
+plot_num_price = function(var, data, cats){
+  p = ggplot(data, aes(x=data[,var], y=Price)) + 
+  geom_point(aes(colour=Purchase), alpha=0.5)+
+      scale_color_manual(labels=c("Yes", "No"), values = c("red", "blue")) +
+      ggtitle(as.character(var)) +
+      xlab(as.character(var)) +
+      scale_y_continuous(limits = c(0,175), breaks=seq(0,175,25))
+   for (cat in cats){
+      return(p + facet_wrap(~data[,cat]))
+   }
+}
+
+for (var in names(sample2)){
+  if (var %in% numerics[1:6]){
+    print(plot_num_price(var, sample2, cats=categorical))
+  }
+}
+```
+
+#### Numerical variables density plots
+```{r}
+p1 = ggplot(data=sample2, aes(x=Age,  colour=Purchase))+
+            geom_density(aplha=0.5) +
+            ylab("Density") +
+            scale_colour_manual(values = cbPalette)
+
+p2 = ggplot(data=sample2, aes(x=Balance,  colour=Purchase))+
+            geom_density(aplha=0.5) + 
+            xlab(paste("Balance, in log scale")) + ylab("Density") +
+            scale_colour_manual(values = cbPalette)+ 
+            scale_x_log10() 
+
+p3 = ggplot(data=sample2, aes(x=Duration,  colour=Purchase)) +
+            geom_density(aplha=0.5) +
+            xlab(paste("Duration, in log scale")) + ylab("Density") +
+            scale_colour_manual(values = cbPalette) + 
+            scale_x_log10()
+
+p4 = ggplot(data=sample2, aes(x=Campaign,  colour=Purchase))+
+            geom_density(aplha=0.5)+ ylab("Density") +
+            xlab(paste("Campaign, in log scale")) + ylab("Density") +
+            scale_colour_manual(values = cbPalette) + 
+            scale_x_log10()
+
+p5 = ggplot(data=sample2, aes(x=Pdays,  colour=Purchase))+
+            geom_density(aplha=0.5)+
+            xlab("# Days after contact, in log scale") + ylab("Density") +
+            scale_colour_manual(values = cbPalette) + 
+            scale_x_log10()
+
+p6 = ggplot(data=sample2, aes(x=Previous,  colour=Purchase)) +
+            geom_density(aplha=0.5)+
+            xlab("# Previous contacts, in log scale") + ylab("Density") +
+            scale_colour_manual(values = cbPalette) +
+            scale_x_log10()
+
+ggarrange(p1, p2, p3, p4, p5, p6, ncol=3, nrow=2, common.legend = TRUE, legend="bottom")
+```
+
+### Calculate Profit
+
+```{r}
+Costs = c(10,20,30,40,50)
+Profit = data.frame(price.per.unit = seq(20,120, 1),
+                    count = rep(0),
+                    revenue = rep(0))
+for (i in 1:length(Profit$count)){
+  Profit$count[i] = sum(sample2$Purchase == "Yes" & sample2$Price > Profit$price.per.unit[i])
+  Profit$revenue[i] = Profit$price.per.unit[i]*Profit$count[i]
+}
+
+colors <- c("$10" = cbPalette[1], "$20"= cbPalette[2] , "$30"= cbPalette[3],
+            "$40"= cbPalette[4], "$50"= cbPalette[5])
+ggplot(Profit, aes(x = price.per.unit)) +
+  geom_line(aes(y = (Profit$revenue - Profit$count*10), color ="$10")) + 
+  geom_line(aes(y = (Profit$revenue - Profit$count*20), color ="$20"))+
+  geom_line(aes(y = (Profit$revenue - Profit$count*30), color ="$30"))+
+  geom_line(aes(y = (Profit$revenue - Profit$count*40), color ="$40"))+
+  geom_line(aes(y = (Profit$revenue - Profit$count*50), color ="$50"))+
+  labs(x = "Price per unit ($)",y = "Profit ($)", color = "Cost per unit") +
+  scale_y_continuous(labels = comma_format(big.mark = ".",
+                                           decimal.mark = ",")) +
+  scale_color_manual(values = colors) +
+  theme(legend.position="right") +
+  scale_x_continuous(limits = c(20,120), breaks=seq(20,120,20)) +
+  scale_y_continuous(limits = c(0,210000), breaks=seq(0, 210000,20000))
+
+
+```
+
